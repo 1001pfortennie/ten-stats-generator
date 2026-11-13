@@ -201,7 +201,7 @@
         <div id="content-ytms"></div>
     </div>
 
-    <!-- แท็บ 4: CHARTS (ปรับเป็นตู้สำหรับใส่หน้าย่อย) -->
+    <!-- แท็บ 4: CHARTS -->
     <div class="tab-section" id="tab-charts">
         <div id="content-charts"></div>
     </div>
@@ -225,14 +225,16 @@
             currentActiveTab = tabId;
         }
 
-        function formatDiff(diffValue) {
-            if (!diffValue) return '';
-            let strValue = String(diffValue).trim();
+        function formatDiff(diffValue, defaultEmpty = '<span class="equal">(=)</span>') {
+            let strValue = String(diffValue || '').trim();
+            if (!strValue || strValue === '-' || strValue === '0' || strValue === '#N/A') return defaultEmpty;
+            
             strValue = strValue.replace(/▲\s*▲/g, '▲');
             strValue = strValue.replace(/▼\s*▼/g, '▼');
             strValue = strValue.replace(/([+-]\s?)(\d{4,})/g, function(match, p1, p2) {
                 return p1 + parseInt(p2).toLocaleString();
             });
+            
             if (strValue.includes('=')) return `<span class="equal">${strValue}</span>`;
             if (strValue.includes('▲')) return `<span class="up">${strValue}</span>`;
             if (strValue.includes('▼')) return `<span class="down">${strValue}</span>`;
@@ -520,14 +522,15 @@
             document.getElementById(tabContentId).innerHTML = finalHtml;
         }
 
-        // --- เพิ่มระบบ Auto-Pagination ให้หน้า CHARTS ---
+        // --- แก้ปัญหาหัวข้อชาร์ตผีหลอก (ไม่มีข้อมูลเพลงแต่โผล่มา) ---
         function processChartsSplitted(data) {
             let rows = [];
 
-            data.forEach(row => {
-                if (!row) return;
-                if (row[1] && String(row[1]).includes('TEN\'s Music Charts')) return;
-                if (!row[1] && !row[2] && !row[3] && !row[4]) return;
+            for (let i = 0; i < data.length; i++) {
+                let row = data[i];
+                if (!row) continue;
+                if (row[1] && String(row[1]).includes('TEN\'s Music Charts')) continue;
+                if (!row[1] && !row[2] && !row[3] && !row[4]) continue;
 
                 let colB = String(row[1] || '').trim(); 
                 let colC = String(row[2] || '').trim(); 
@@ -535,8 +538,20 @@
                 let colE = String(row[4] || '').trim(); 
                 let colF = String(row[5] || '').trim(); 
 
-                // แถวหัวข้อ (No.)
                 if (colE.toUpperCase() === 'NO.') {
+                    // ระบบดักจับผีหลอก: เช็กแถวถัดไปว่ามีข้อมูลชาร์ตจริงๆ ไหม ถ้าช่อง No. ในแถวถัดไปว่างเปล่า = ชาร์ตผีหลอก
+                    let isGhostChart = true;
+                    if (i + 1 < data.length) {
+                        let nextRowColE = String(data[i+1][4] || '').trim();
+                        // ถ้าแถวถัดไปมีเลข No. กรอกอยู่ แสดงว่ามีข้อมูลจริง ไม่ใช่ผีหลอก
+                        if (nextRowColE !== '' && nextRowColE.toUpperCase() !== 'NO.') {
+                            isGhostChart = false;
+                        }
+                    }
+
+                    // ถ้าเป็นชาร์ตผีหลอก (ไม่มีข้อมูล) ให้ข้ามบรรทัดนี้ไปเลย ไม่ต้องวาด!
+                    if (isGhostChart) continue;
+
                     let bgClass = 'bg-itunes'; 
                     let platformName = colB.toLowerCase();
                     
@@ -545,16 +560,17 @@
                     else if (platformName.includes('shazam')) bgClass = 'bg-shazam';
                     else if (platformName.includes('billboard')) bgClass = 'bg-billboard';
 
+                    let diffContent = colF.trim() ? formatDiff(colF) : '<span style="color:#ef4444; font-weight:800; font-size:12px;">▲ ▼</span>';
+
                     let htmlRow = `<tr class="chart-header ${bgClass}">
                         <td style="text-align: left; width: 30%; padding-left: 20px;">${colB}</td>
                         <td style="width: 20%;">Country</td>
                         <td style="width: 25%;">Name</td>
                         <td style="width: 10%;">No.</td>
-                        <td style="width: 15%; text-align: right; padding-right: 20px;">${formatDiff(colF) || '<span style="color:#ef4444">▲ ▼</span>'}</td>
+                        <td style="width: 15%; text-align: right; padding-right: 20px;">${diffContent}</td>
                     </tr>`;
                     rows.push({ type: 'header', html: htmlRow, height: 46 });
                 } 
-                // แถวข้อมูล
                 else if (colB && colC && colD && colE) {
                     let htmlRow = `<tr class="data-row">
                         <td style="text-align: left; padding-left: 20px;">${colB}</td>
@@ -565,11 +581,10 @@
                     </tr>`;
                     rows.push({ type: 'data', html: htmlRow, height: 46 });
                 }
-            });
+            }
 
-            // ระบบหั่นหน้ากระดาษ (Pagination) ให้หน้า Charts
             let pages = [];
-            let currentPage = { rowsHtml: '', height: 200 }; // เผื่อความสูงของ Header และ Padding
+            let currentPage = { rowsHtml: '', height: 200 }; 
 
             rows.forEach(r => {
                 if (currentPage.height + r.height > 960 && currentPage.height > 200) {
@@ -608,7 +623,6 @@
 
         async function loadAllData() {
             try {
-                // ต้องโหลด Overall ก่อนเพื่อดึง Global Date มาใช้กับแท็บอื่น
                 const dataOverall = await fetchCSV(CSV_OVERALL);
                 if (dataOverall) processOverall(dataOverall);
 
@@ -632,7 +646,6 @@
 
         window.onload = loadAllData;
 
-        // ระบบดาวน์โหลดภาพแบบ Zip/PNG
         async function saveAsImage() {
             const btn = document.getElementById('btn-save');
             const oldText = btn.innerText;
